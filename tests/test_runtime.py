@@ -133,6 +133,21 @@ class RuntimeTest(unittest.TestCase):
             for event in matching_events:
                 self.assertEqual(set(event.payload), keys)
 
+    def test_listener_failure_does_not_stop_runtime(self) -> None:
+        def failing_listener(event: Event) -> None:
+            raise RuntimeError(f"Cannot process {event.name}")
+
+        self.runtime.subscribe("PresenceDetected", failing_listener)
+        self.runtime.start()
+
+        with self.assertLogs("events.dispatcher", level="ERROR"):
+            self.runtime.post_event(PresenceDetected(timestamp=self.clock.current))
+            self.runtime.wait_until_idle()
+
+        self.assertTrue(self.runtime.is_running)
+        self.assertEqual(self.manager.state, PresenceState.WORKING)
+        self.assertIn("SessionStarted", [event.name for event in self.events])
+
 
 if __name__ == "__main__":
     unittest.main()

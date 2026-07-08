@@ -166,10 +166,17 @@ class AIDeskPresenceAPI:
     def get_today_timeline(self) -> list[dict[str, Any]]:
         """Return today's sessions, breaks, and context events in time order."""
 
-        today = utc_now().date()
+        return self.get_timeline_for_day(utc_now().date())
+
+    def get_timeline_for_day(
+        self,
+        target_date: date,
+    ) -> list[dict[str, Any]]:
+        """Return one UTC day's timeline in chronological order."""
+
         items: list[dict[str, Any]] = []
 
-        for session in self.repository.list_sessions_for_day(today):
+        for session in self.repository.list_sessions_for_day(target_date):
             items.append(
                 {
                     "type": "session",
@@ -182,7 +189,7 @@ class AIDeskPresenceAPI:
                 }
             )
 
-        for break_record in self.repository.list_breaks_for_day(today):
+        for break_record in self.repository.list_breaks_for_day(target_date):
             items.append(
                 {
                     "type": "break",
@@ -195,7 +202,8 @@ class AIDeskPresenceAPI:
                 }
             )
 
-        for context_event in self.repository.list_context_events_for_day(today):
+        context_events = self.repository.list_context_events_for_day(target_date)
+        for context_event in context_events:
             items.append(
                 {
                     "type": "context_event",

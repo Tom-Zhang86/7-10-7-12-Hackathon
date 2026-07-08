@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from database.repository import SessionRepository
@@ -25,6 +25,7 @@ class SessionManager:
         self.clock = clock
         self.state = PresenceState.IDLE
         self.current_session_id: Optional[int] = None
+        self.finished_on: Optional[date] = None
 
         self._restore_active_state()
 
@@ -32,7 +33,8 @@ class SessionManager:
         """Apply one hardware presence event and return the current state."""
 
         if self.state == PresenceState.FINISHED:
-            return self.state
+            if not present or not self.start_new_day_if_needed():
+                return self.state
 
         if present and self.state == PresenceState.IDLE:
             self.start_work()
@@ -79,6 +81,7 @@ class SessionManager:
 
         self.current_session_id = None
         self.state = PresenceState.FINISHED
+        self.finished_on = ended_at.date()
         return session
 
     def start_break(self) -> BreakRecord:
@@ -127,10 +130,23 @@ class SessionManager:
 
         if self.state == PresenceState.IDLE:
             self.state = PresenceState.FINISHED
+            self.finished_on = self.clock().date()
             return None
         if self.state == PresenceState.FINISHED:
             return None
         return self.end_work()
+
+    def start_new_day_if_needed(self) -> bool:
+        """Reset a finished lifecycle after the UTC calendar day changes."""
+
+        if self.state != PresenceState.FINISHED or self.finished_on is None:
+            return False
+        if self.clock().date() <= self.finished_on:
+            return False
+
+        self.state = PresenceState.IDLE
+        self.finished_on = None
+        return True
 
     def get_current_session(self) -> Optional[SessionRecord]:
         """Return the active session, if there is one."""

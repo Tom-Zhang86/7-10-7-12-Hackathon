@@ -1,10 +1,12 @@
 from collections import defaultdict
 from collections.abc import Callable
+import logging
 from threading import RLock
 
 from events.event_types import Event
 
 EventListener = Callable[[Event], None]
+logger = logging.getLogger(__name__)
 
 
 class EventDispatcher:
@@ -32,11 +34,17 @@ class EventDispatcher:
                 listeners.remove(listener)
 
     def publish(self, event: Event) -> None:
-        """Notify listeners without allowing one listener to block the rest."""
+        """Notify listeners while isolating failures in external modules."""
 
         with self._lock:
             listeners = list(self._listeners[event.name])
             listeners += list(self._listeners[self.WILDCARD])
 
         for listener in listeners:
-            listener(event)
+            try:
+                listener(event)
+            except Exception:
+                logger.exception(
+                    "Event listener failed while handling %s.",
+                    event.name,
+                )

@@ -1,5 +1,6 @@
 from collections.abc import Callable
 from datetime import datetime
+import logging
 from queue import Empty, Queue
 from threading import Event as ThreadEvent
 from threading import Thread
@@ -23,6 +24,8 @@ from models.state import PresenceState
 from services.stats_service import StatsService
 from session.manager import SessionManager
 from utils.time_utils import utc_now
+
+logger = logging.getLogger(__name__)
 
 
 class Runtime:
@@ -103,16 +106,26 @@ class Runtime:
         self.dispatcher.unsubscribe(event_name, listener)
 
     def _run_loop(self) -> None:
-        while not self._stop_signal.is_set():
-            try:
-                event = self._queue.get(timeout=0.2)
-            except Empty:
-                continue
+        try:
+            while not self._stop_signal.is_set():
+                try:
+                    event = self._queue.get(timeout=0.2)
+                except Empty:
+                    continue
 
-            self._handle_event(event)
-            self._queue.task_done()
-
-        self._running = False
+                try:
+                    self._handle_event(event)
+                except Exception:
+                    logger.exception(
+                        "Runtime failed while handling %s.",
+                        event.name,
+                    )
+                finally:
+                    if isinstance(event, Shutdown):
+                        self._stop_signal.set()
+                    self._queue.task_done()
+        finally:
+            self._running = False
 
     def _handle_event(self, event: Event) -> None:
         self.dispatcher.publish(event)
@@ -127,7 +140,13 @@ class Runtime:
     def _handle_presence_detected(self) -> None:
         old_state = self.session_manager.state
 
-        if old_state == PresenceState.IDLE:
+        if (
+            old_state == PresenceState.FINISHED
+            and not self.session_manager.start_new_day_if_needed()
+        ):
+            return
+
+        if self.session_manager.state == PresenceState.IDLE:
             session = self.session_manager.start_work()
             self._publish_state_change(old_state)
             self._publish_session_started(session)

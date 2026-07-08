@@ -71,6 +71,24 @@ class SessionFlowTest(unittest.TestCase):
         self.assertEqual(len(sessions), 1)
         self.assertEqual(self.manager.state, PresenceState.WORKING)
 
+    def test_finished_state_resets_only_on_a_new_utc_day(self) -> None:
+        self.manager.handle_presence(True)
+        self.clock.advance(hours=1)
+        self.manager.finish_day()
+
+        self.manager.handle_presence(True)
+        self.assertEqual(self.manager.state, PresenceState.FINISHED)
+
+        self.clock.advance(days=1)
+        self.manager.handle_presence(False)
+        self.assertEqual(self.manager.state, PresenceState.FINISHED)
+
+        self.manager.handle_presence(True)
+
+        sessions = self.repository.list_sessions_for_day(self.clock.current.date())
+        self.assertEqual(self.manager.state, PresenceState.WORKING)
+        self.assertEqual(len(sessions), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

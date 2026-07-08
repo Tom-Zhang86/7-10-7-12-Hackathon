@@ -35,6 +35,7 @@ main.py
 ├── listeners/
 │   └── event_log_listener.py
 ├── models/
+│   ├── context_event.py
 │   ├── session_record.py
 │   ├── state.py
 │   └── stats.py
@@ -46,6 +47,8 @@ main.py
 ├── session/
 │   └── manager.py
 ├── tests/
+│   ├── test_database_cleanup.py
+│   ├── test_public_api.py
 │   ├── test_runtime.py
 │   └── test_session_flow.py
 ├── utils/
@@ -87,6 +90,9 @@ System event payloads use these stable keys:
 State values are strings. Time values are ISO-8601 strings. Durations and
 counts are integers.
 
+Listener failures are logged and isolated so one external module cannot stop
+the runtime or prevent other listeners from receiving an event.
+
 ## Public Context and Timeline APIs
 
 The system-layer API exposes context capture and timeline methods for UI and AI
@@ -101,6 +107,7 @@ api.record_context_event(
 
 api.get_context_events_for_day(date=None)
 api.get_today_timeline()
+api.get_timeline_for_day(target_date)
 api.close()
 ```
 
@@ -112,10 +119,17 @@ stored as JSON.
 `get_context_events_for_day` returns structured dictionaries. If `date` is
 `None`, it returns today's UTC context events.
 
-`get_today_timeline` returns one time-ordered list containing `session`,
-`break`, and `context_event` items. Every item includes `type` and `timestamp`;
-session and break items include `start_time`, `end_time`, and `session_id`;
-context items include `session_id`, `source`, and `payload`.
+`get_today_timeline` and `get_timeline_for_day` return one time-ordered list
+containing `session`, `break`, and `context_event` items. Every item includes
+`type` and `timestamp`; session and break items include `start_time`,
+`end_time`, and `session_id`; context items include `session_id`, `source`, and
+`payload`. Public query methods return timezone-aware Python `datetime`
+objects; callers crossing a JSON boundary should convert them to ISO-8601
+strings.
+
+All daily boundaries use UTC. After `finish_day()` moves the state to
+`Finished`, presence remains ignored for the rest of that UTC day. The first
+presence detection on a later UTC day automatically starts a new lifecycle.
 
 ## Run
 

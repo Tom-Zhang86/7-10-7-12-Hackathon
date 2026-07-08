@@ -63,6 +63,10 @@ class PublicAPITest(unittest.TestCase):
         self.assertEqual(timeline[2]["break_id"], break_record.id)
         self.assertEqual(timeline, sorted(timeline, key=lambda item: item["timestamp"]))
         self.assertEqual(context_event["session_id"], session.id)
+        self.assertEqual(
+            self.api.get_timeline_for_day(context_event["timestamp"].date()),
+            timeline,
+        )
 
 
 if __name__ == "__main__":
