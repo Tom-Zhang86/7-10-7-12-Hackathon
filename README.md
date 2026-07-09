@@ -5,8 +5,11 @@ management, the Idle / Working / Break / Finished state machine, SQLite
 persistence, daily statistics, an event runtime, observer/listener support, and
 a single API surface for future modules.
 
-This stage intentionally does not include AI, UI, serial communication,
-millimeter-wave radar integration, or desktop context capture.
+The stable system layer intentionally does not contain AI, UI, serial
+communication, millimeter-wave radar integration, or desktop context capture.
+The separate `application/` package now adds macOS context capture, daily-data
+aggregation, manually triggered AI summaries, and a minimal Tkinter dashboard
+through this public API without changing the system-layer core.
 
 ## Runtime Flow
 
@@ -165,4 +168,11 @@ def on_event(event):
     print(event.name, event.payload)
 
 api.runtime.subscribe("*", on_event)
+```
+
+## Application Demo
+
+```bash
+python3 -m pip install -r requirements.txt
+python3 run_demo.py
 ```
