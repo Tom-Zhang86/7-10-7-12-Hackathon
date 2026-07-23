@@ -23,6 +23,38 @@ JsonTransport = Callable[
 ]
 
 
+def _decode_json_response(body: str, provider: str) -> dict[str, Any]:
+    try:
+        value = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise LLMClientError(f"{provider} API returned invalid JSON.") from exc
+    if not isinstance(value, dict):
+        raise LLMClientError(f"{provider} API returned an unexpected response.")
+    return value
+
+
+def _get_json(
+    url: str,
+    headers: dict[str, str],
+    timeout: float,
+) -> dict[str, Any]:
+    """Perform the small authenticated GET used by provider validation."""
+
+    request = Request(url, headers=headers, method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read().decode("utf-8")
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise LLMClientError(
+            f"Provider API returned HTTP {exc.code}: {detail[:500]}"
+        ) from exc
+    except (URLError, TimeoutError, OSError) as exc:
+        raise LLMClientError(f"Provider API request failed: {exc}") from exc
+
+    return _decode_json_response(body, "Provider")
+
+
 def _post_json(
     url: str,
     headers: dict[str, str],
@@ -46,13 +78,7 @@ def _post_json(
     except (URLError, TimeoutError, OSError) as exc:
         raise LLMClientError(f"OpenAI API request failed: {exc}") from exc
 
-    try:
-        value = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise LLMClientError("OpenAI API returned invalid JSON.") from exc
-    if not isinstance(value, dict):
-        raise LLMClientError("OpenAI API returned an unexpected response.")
-    return value
+    return _decode_json_response(body, "OpenAI")
 
 
 class OpenAIResponsesClient:

@@ -3,6 +3,7 @@ import unittest
 from pathlib import Path
 
 from services.ai_desk_api import AIDeskPresenceAPI
+from models.state import PresenceState
 
 
 class PublicAPITest(unittest.TestCase):
@@ -67,6 +68,11 @@ class PublicAPITest(unittest.TestCase):
             self.api.get_timeline_for_day(context_event["timestamp"].date()),
             timeline,
         )
+
+    def test_presence_ingestion_contract_remains_boolean_to_state(self) -> None:
+        self.assertEqual(self.api.ingest_presence(True), PresenceState.WORKING)
+        self.assertEqual(self.api.ingest_presence(False), PresenceState.BREAK)
+        self.assertEqual(self.api.ingest_presence(True), PresenceState.WORKING)
 
 
 if __name__ == "__main__":

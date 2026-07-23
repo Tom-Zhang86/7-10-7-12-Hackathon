@@ -1,4 +1,4 @@
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime, timezone
 import logging
 import tkinter as tk
@@ -7,6 +7,7 @@ from tkinter import ttk
 from typing import Any
 
 from application.summary.models import SummaryGeneration
+from application.ui.provider_settings import ProviderSettingsDialog
 from application.ui.presentation import (
     build_timeline_rows,
     format_duration,
@@ -33,13 +34,28 @@ class DashboardApp:
         controller: Any,
         summary_service: Any,
         summary_store: Any,
+        activity_service: Any | None = None,
+        privacy_policy: Any | None = None,
+        privacy_store: Any | None = None,
+        provider_settings: Any | None = None,
+        provider_validator: Any | None = None,
     ) -> None:
         self.root = root
         self.api = api
         self.controller = controller
         self.summary_service = summary_service
         self.summary_store = summary_store
+        self.activity_service = activity_service
+        self.privacy_policy = privacy_policy
+        self.privacy_store = privacy_store
+        self.provider_settings = provider_settings
+        self.provider_validator = provider_validator
         self._summary_future: Future[SummaryGeneration] | None = None
+        self._activity_future: Future[dict[str, int]] | None = None
+        self._activity_executor = ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="activity-dashboard",
+        )
         self._closing = False
 
         self.status_var = tk.StringVar(value="● 空闲")
@@ -47,6 +63,8 @@ class DashboardApp:
         self.focus_var = tk.StringVar(value="00:00:00")
         self.break_var = tk.StringVar(value="0")
         self.summary_meta_var = tk.StringVar(value="尚未生成")
+        self.activity_var = tk.StringVar(value="活动分类：等待数据")
+        self.pause_var = tk.StringVar(value="暂停采集")
 
         self._configure_window()
         self._configure_styles()
@@ -58,6 +76,7 @@ class DashboardApp:
         self._load_saved_summary()
         self._refresh_dashboard()
         self._refresh_timeline()
+        self._refresh_activity()
 
     def run(self) -> None:
         self.start()
@@ -70,6 +89,7 @@ class DashboardApp:
         try:
             self.controller.stop(stop_runtime=False)
             self.summary_service.close()
+            self._activity_executor.shutdown(wait=False, cancel_futures=True)
             self.api.close()
         finally:
             self.root.destroy()
@@ -130,6 +150,23 @@ class DashboardApp:
             font=("Helvetica Neue", 12, "bold"),
         )
         self.status_label.pack(side="right", pady=(8, 0))
+        if self.privacy_policy is not None:
+            self.pause_button = ttk.Button(
+                header,
+                textvariable=self.pause_var,
+                command=self._toggle_capture,
+            )
+            self.pause_button.pack(side="right", padx=(0, 14), pady=(4, 0))
+            self._refresh_pause_label()
+        if (
+            self.provider_settings is not None
+            and self.provider_validator is not None
+        ):
+            ttk.Button(
+                header,
+                text="AI 设置",
+                command=self._open_provider_settings,
+            ).pack(side="right", padx=(0, 8), pady=(4, 0))
 
         stats = tk.Frame(shell, bg=self.BACKGROUND)
         stats.pack(fill="x", pady=(22, 18))
@@ -149,6 +186,14 @@ class DashboardApp:
             fill="x",
             expand=True,
         )
+
+        tk.Label(
+            shell,
+            textvariable=self.activity_var,
+            bg=self.BACKGROUND,
+            fg=self.MUTED,
+            font=("Helvetica Neue", 10),
+        ).pack(anchor="w", pady=(0, 12))
 
         content = tk.Frame(shell, bg=self.BACKGROUND)
         content.pack(fill="both", expand=True)
@@ -324,6 +369,68 @@ class DashboardApp:
             return
         self._refresh_timeline_data()
         self.root.after(5000, self._refresh_timeline)
+
+    def _refresh_activity(self) -> None:
+        if self._closing:
+            return
+        if self.activity_service is not None and (
+            self._activity_future is None or self._activity_future.done()
+        ):
+            self._activity_future = self._activity_executor.submit(
+                self.activity_service.category_seconds_today
+            )
+            self.root.after(100, self._poll_activity)
+        self.root.after(10000, self._refresh_activity)
+
+    def _poll_activity(self) -> None:
+        if self._closing or self._activity_future is None:
+            return
+        if not self._activity_future.done():
+            self.root.after(100, self._poll_activity)
+            return
+        try:
+            totals = self._activity_future.result()
+        except Exception:
+            logger.exception("Activity classification refresh failed.")
+            self.activity_var.set("活动分类：暂时不可用")
+            return
+        labels = {
+            "learning": "学习",
+            "work": "工作",
+            "entertainment": "娱乐",
+            "unknown": "未知",
+            "background_playback": "离座播放",
+        }
+        parts = [
+            f"{labels[key]} {format_duration(seconds)}"
+            for key, seconds in totals.items()
+            if seconds > 0 and key in labels
+        ]
+        self.activity_var.set(
+            "活动分类：" + (" · ".join(parts) if parts else "等待数据")
+        )
+
+    def _toggle_capture(self) -> None:
+        if self.privacy_policy is None:
+            return
+        self.privacy_policy.paused = not self.privacy_policy.paused
+        if self.privacy_store is not None:
+            self.privacy_store.save(self.privacy_policy)
+        self._refresh_pause_label()
+
+    def _refresh_pause_label(self) -> None:
+        if self.privacy_policy is None:
+            return
+        self.pause_var.set(
+            "恢复采集" if self.privacy_policy.paused else "暂停采集"
+        )
+
+    def _open_provider_settings(self) -> None:
+        ProviderSettingsDialog(
+            self.root,
+            self.provider_settings,
+            self.provider_validator,
+        )
 
     def _refresh_timeline_data(self) -> None:
         try:

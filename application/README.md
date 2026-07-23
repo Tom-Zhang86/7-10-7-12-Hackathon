@@ -8,9 +8,16 @@ Implemented:
 - event-driven application controller;
 - macOS frontmost app/window capture while the state is `Working`;
 - context deduplication with a periodic heartbeat;
-- compact daily session, break, statistics, and activity aggregation.
-- manual AI daily-summary generation with structured output and local fallback.
-- minimal macOS-oriented dashboard for status, statistics, timeline, and summary.
+- internal ActivityWatch-inspired buckets, events, and heartbeat spans without
+  requiring ActivityWatch to be installed;
+- additive activity storage while legacy `context_events` remain compatible;
+- optional Chrome semantic capture through a local native-messaging bridge;
+- rule-first learning/work/entertainment classification, with optional remote
+  classification through the existing provider settings;
+- session/presence/activity fusion and compact daily category aggregation;
+- throttled macOS Accessibility capture with no screenshots or OCR;
+- manual AI daily-summary generation with structured output and local fallback;
+- minimal macOS-oriented dashboard with capture pause and AI settings.
 
 ## macOS permission
 
@@ -20,17 +27,33 @@ terminal or packaged Python application permission under:
 `System Settings → Privacy & Security → Accessibility`
 
 If permission is denied, capture errors are logged and the system runtime keeps
-running. No keyboard input, screenshots, or document contents are captured.
+running. No keyboard input, screenshots, OCR, form values, or full document
+contents are captured. The optional Accessibility source reads only a bounded
+set of visible labels, headings, and links every 15 seconds.
+
+The demo routes the macOS sources through `ActivityCoordinator`. It persists
+compact activity spans and continues to emit the existing active-window context
+events, so the public system API, timeline, and summary pipeline are unchanged.
+The activity layer has no ActivityWatch runtime or package dependency.
 
 Typical construction:
 
 ```python
 from application import ApplicationController
-from application.context import ContextCollector, MacOSContextProvider
+from application.activity import (
+    ActivityCoordinator,
+    ActivityStore,
+    MacOSWindowSource,
+)
+from application.context import MacOSContextProvider
 from services.ai_desk_api import AIDeskPresenceAPI
 
 api = AIDeskPresenceAPI()
-collector = ContextCollector(api, MacOSContextProvider())
+collector = ActivityCoordinator(
+    api,
+    [MacOSWindowSource(MacOSContextProvider())],
+    ActivityStore(api.database),
+)
 controller = ApplicationController(api, collector)
 controller.start()
 ```
@@ -41,7 +64,13 @@ ending the current backend lifecycle.
 
 ## Manual AI summary
 
-Create `.env` in the repository root (it is ignored by Git):
+The demo's **AI Settings** button stores the selected provider, model, and API
+key in macOS Keychain. Remote activity classification is disabled by default;
+the local rules remain usable without a key or network connection.
+
+The older direct OpenAI client is still available for integrations that prefer
+environment variables. Create `.env` in the repository root (it is ignored by
+Git):
 
 ```dotenv
 OPENAI_API_KEY="..."
@@ -92,6 +121,38 @@ RUN_OPENAI_INTEGRATION=1 \
 
 Keep `RUN_OPENAI_INTEGRATION` out of `.env`; setting it only for the command
 makes accidental API calls less likely.
+
+## Chrome semantic capture
+
+Chrome support is optional and does not require ActivityWatch. On macOS:
+
+1. Load `browser_extension/` as an unpacked extension at
+   `chrome://extensions`.
+2. Copy its generated extension ID.
+3. Run `python3 -m application.browser.install_native_host <extension-id>`.
+4. Restart Chrome.
+
+The extension sends the page origin/path, title, description, bounded headings,
+language, and media state. It omits query strings, fragments, forms, cookies,
+and full HTML. Incognito observations are rejected. The native host reads the
+same pause and exclusion policy as the desktop collector.
+
+## Fusion and classification
+
+`ActivityFusionService` intersects the compact activity spans with the public
+session/break timeline. Browser semantics take priority over Accessibility
+labels, which take priority over the active-window title. Away-time media is
+reported separately as `background_playback`.
+
+Classification is rule-first and cached by a stable segment hash. Known
+learning domains and development applications are handled locally. Ambiguous
+segments remain `unknown` unless remote classification is explicitly enabled in
+the activity privacy settings. No OCR fallback is included in this MVP.
+
+The privacy file is stored at
+`~/Library/Application Support/AI Desk/activity-privacy.json` on macOS. It can
+pause capture, disable remote classification, and exclude application names or
+hostnames.
 
 ## Demo dashboard
 

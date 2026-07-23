@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "AI Desk Semantic Activity",
+  "version": "0.1.0",
+  "description": "Sends privacy-limited active page metadata to AI Desk.",
+  "permissions": ["nativeMessaging", "tabs"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content_script.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "AI Desk activity capture"
+  }
+}

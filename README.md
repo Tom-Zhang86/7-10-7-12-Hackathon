@@ -7,9 +7,12 @@ a single API surface for future modules.
 
 The stable system layer intentionally does not contain AI, UI, serial
 communication, millimeter-wave radar integration, or desktop context capture.
-The separate `application/` package now adds macOS context capture, daily-data
-aggregation, manually triggered AI summaries, and a minimal Tkinter dashboard
-through this public API without changing the system-layer core.
+The separate `application/` package adds an ActivityWatch-inspired local
+activity layer, macOS context capture, optional Chrome page semantics,
+session/activity fusion, rule-first classification, manually triggered AI
+summaries, privacy controls, and a minimal Tkinter dashboard through this public
+API without changing the system-layer core. It does not require ActivityWatch
+and does not use screenshots or OCR.
 
 ## Runtime Flow
 
@@ -176,3 +179,44 @@ api.runtime.subscribe("*", on_event)
 python3 -m pip install -r requirements.txt
 python3 run_demo.py
 ```
+
+The current MVP targets macOS. Active-window and bounded Accessibility capture
+require Accessibility permission. Chrome semantic capture is optional and has
+a one-time unpacked-extension/native-host setup described in
+`browser_extension/README.md`. Remote classification is opt-in; local rules and
+the rest of the runtime work offline.
+
+## Project Direction: Presence-Driven Agent Handoff
+
+The current MVP combines physical seat presence with application, browser, and
+Accessibility metadata to classify time as learning, work, entertainment,
+unknown, or background playback. This is useful, but it is not sufficiently
+distinctive on its own. Existing activity trackers such as ActivityWatch
+already collect active-window, browser, and AFK events and support rule-based
+categorization. Adding a physical `present`/`away` signal mainly improves the
+accuracy of those timelines; if presence is used only as another field, the
+product remains an activity tracker with an additional sensor.
+
+The next project goal is therefore **Presence-Driven Agent Handoff**. Physical
+presence transitions will become control signals for collaboration between the
+human and a bounded coding agent:
+
+- while the user is present, the system maintains the current goal, evidence,
+  progress, and a resumable task context;
+- when the user leaves, it creates a checkpoint and may delegate only
+  pre-authorized work such as reading code, running tests, linting, or preparing
+  a proposed patch;
+- while the user is away, agent actions and outcomes are recorded in an
+  auditable timeline rather than being treated as human activity;
+- when the user returns, the system presents what was happening before the
+  interruption, what the agent completed, what remains uncertain, and the next
+  recommended action;
+- commits, pushes, external messages, and other consequential actions remain
+  outside the default agent capability policy and require explicit approval.
+
+This direction makes the sensor essential to the product instead of merely
+improving AFK detection. The primary unit also changes from time spent in an
+application to a safe, observable handoff around a declared goal and measurable
+outcomes. Activity collection, semantic classification, privacy controls, and
+the existing session state machine remain useful infrastructure, but they now
+support human-agent coordination rather than being the final product.
