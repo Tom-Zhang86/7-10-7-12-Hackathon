@@ -4,4 +4,6 @@ __pycache__/
 logs/
 .env
 data/summaries/
+data/handoffs/
+data/*.sqlite3*
 Espressif-ESP32-3.3.10-Windows64-offline.zip
