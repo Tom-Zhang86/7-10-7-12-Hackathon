@@ -569,4 +569,11 @@ class DashboardApp:
         if generation.source == "fallback":
             self.summary_meta_var.set(f"本地生成 · {local_time}")
         else:
-            self.summary_meta_var.set(f"更新于 {local_time}")
+            provider = generation.source.split(":", 1)[0].lower()
+            provider_label = {
+                "openai": "OpenAI",
+                "anthropic": "Anthropic",
+                "google": "Gemini",
+                "llm": "远程 AI",
+            }.get(provider, provider or "远程 AI")
+            self.summary_meta_var.set(f"{provider_label} · {local_time}")

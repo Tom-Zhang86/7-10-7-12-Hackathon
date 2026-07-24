@@ -28,6 +28,7 @@ class ActivityCoordinator:
         store: Any,
         poll_seconds: float = 5.0,
         pulsetime_seconds: float = 20.0,
+        persistence_heartbeat_seconds: float = 60.0,
         compatibility_heartbeat_seconds: float = 60.0,
         privacy_policy: Any | None = None,
         clock: Callable[[], datetime] = utc_now,
@@ -36,6 +37,7 @@ class ActivityCoordinator:
         self.sources = tuple(sources)
         self.store = store
         self.poll_seconds = poll_seconds
+        self.persistence_heartbeat_seconds = persistence_heartbeat_seconds
         self.compatibility_heartbeat_seconds = compatibility_heartbeat_seconds
         self.privacy_policy = privacy_policy
         self.clock = clock
@@ -47,6 +49,8 @@ class ActivityCoordinator:
         self._session_id: int | None = None
         self._last_compatibility_hash: dict[str, str] = {}
         self._last_compatibility_at: dict[str, datetime] = {}
+        self._last_persisted_hash: dict[str, str] = {}
+        self._last_persisted_at: dict[str, datetime] = {}
 
     @property
     def is_running(self) -> bool:
@@ -87,9 +91,16 @@ class ActivityCoordinator:
             self._session_id = None
         self._last_compatibility_hash.clear()
         self._last_compatibility_at.clear()
+        self._last_persisted_hash.clear()
+        self._last_persisted_at.clear()
 
     def capture_once(self, session_id: int) -> int:
         """Capture all sources once and return the observation count."""
+
+        # Pausing must skip the source itself. Accessibility capture can be
+        # expensive even when its result is discarded by the privacy filter.
+        if self.privacy_policy and self.privacy_policy.paused:
+            return 0
 
         captured = 0
         for source in self.sources:
@@ -131,7 +142,21 @@ class ActivityCoordinator:
         )
         if self.privacy_policy and not self.privacy_policy.allows(sanitized.data):
             return
-        self._persist(self.reducer.ingest(sanitized))
+        spans = self.reducer.ingest(sanitized)
+        previous_hash = self._last_persisted_hash.get(sanitized.bucket_id)
+        previous_at = self._last_persisted_at.get(sanitized.bucket_id)
+        heartbeat_due = (
+            previous_at is None
+            or (
+                sanitized.timestamp - previous_at
+            ).total_seconds() >= self.persistence_heartbeat_seconds
+        )
+        if previous_hash != sanitized.content_hash or heartbeat_due:
+            self._persist(spans)
+            self._last_persisted_hash[sanitized.bucket_id] = (
+                sanitized.content_hash
+            )
+            self._last_persisted_at[sanitized.bucket_id] = sanitized.timestamp
         if sanitized.event_type == "currentwindow":
             self._record_compatibility_event(sanitized, session_id)
 

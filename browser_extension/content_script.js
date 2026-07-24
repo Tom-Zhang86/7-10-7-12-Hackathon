@@ -67,10 +67,6 @@ function scheduleSend(delay = 1200) {
   sendTimer = setTimeout(sendContext, delay);
 }
 
-new MutationObserver(() => scheduleSend()).observe(document.documentElement, {
-  childList: true,
-  subtree: true,
-});
 document.addEventListener("play", () => scheduleSend(100), true);
 document.addEventListener("pause", () => scheduleSend(100), true);
 document.addEventListener("visibilitychange", () => scheduleSend(100));
@@ -78,4 +74,4 @@ scheduleSend(100);
 setInterval(() => {
   lastHash = "";
   scheduleSend(100);
-}, 10000);
+}, 30000);

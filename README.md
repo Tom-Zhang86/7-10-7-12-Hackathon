@@ -180,8 +180,10 @@ python3 -m pip install -r requirements.txt
 python3 run_demo.py
 ```
 
-The current MVP targets macOS. Active-window and bounded Accessibility capture
-require Accessibility permission. Chrome semantic capture is optional and has
+The current MVP targets macOS. Active-window capture requires Accessibility
+permission. Full Accessibility text capture is disabled by default and can be
+enabled with `AIDESK_ENABLE_ACCESSIBILITY=1` for diagnostics. Chrome semantic
+capture is optional and has
 a one-time unpacked-extension/native-host setup described in
 `browser_extension/README.md`. Remote classification is opt-in; local rules and
 the rest of the runtime work offline.

@@ -29,27 +29,38 @@ class FallbackSummaryGenerator:
 
         completed = []
         insights = []
-        if apps:
+        blocks = daily_data.get("activity_blocks", [])
+        if blocks:
+            for block in blocks[-3:]:
+                title = str(block.get("window_title") or "").strip()
+                app = str(block.get("app") or "Unknown")
+                subject = f"{app} — {title}" if title else app
+                start = str(block.get("start") or "")[11:16]
+                completed.append(f"{start}：{subject}")
+        elif apps:
             names = [str(item.get("app", "Unknown")) for item in apps[:3]]
             completed.append(
-                "主要前台活动涉及：" + "、".join(names)
+                "观察到的前台应用：" + "、".join(names)
             )
-            for item in apps[:3]:
-                insights.append(
-                    f"{item.get('app', 'Unknown')} 的可估算前台时间约为"
-                    f"{_duration(int(item.get('estimated_seconds', 0)))}。"
-                )
         else:
             completed.append("今天没有足够的电脑上下文用于判断具体活动。")
 
-        suggestions = ["继续记录工作上下文，以获得更准确的日报。"]
-        if longest and longest < 25 * 60:
-            suggestions.insert(0, "明天可尝试安排至少 25 分钟的连续专注时段。")
-        elif longest:
-            suggestions.insert(0, "延续今天较长的连续专注节奏。")
+        if apps:
+            top = apps[0]
+            insights.append(
+                f"记录中停留时间最长的应用是 {top.get('app', 'Unknown')}，"
+                f"约 {_duration(int(top.get('estimated_seconds', 0)))}。"
+            )
+        insights.append("前台窗口记录不能证明具体成果已经完成。")
+
+        suggestions = ["从最后一个有标题的工作窗口继续。"]
 
         return DailySummary(
-            headline="今日工作概览",
+            headline=(
+                f"今日工作集中在 {apps[0].get('app', 'Unknown')}"
+                if apps
+                else "今日缺少可识别的工作窗口"
+            ),
             completed=completed,
             work_duration_summary=(
                 f"今日累计工作 {_duration(work_seconds)}，"
@@ -62,7 +73,7 @@ class FallbackSummaryGenerator:
             activity_insights=insights,
             tomorrow_suggestions=suggestions,
             data_quality_note=(
-                "当前为本地规则生成的降级总结；具体活动仅依据前台应用"
+                "当前为本地规则生成；具体活动仅依据前台应用"
                 "和窗口采样估算。"
             ),
         )

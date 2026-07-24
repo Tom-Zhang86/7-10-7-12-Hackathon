@@ -4,6 +4,7 @@ import unittest
 from application.activity import (
     ActivityCoordinator,
     ActivityObservation,
+    ActivityPrivacyPolicy,
     HeartbeatReducer,
     MacOSWindowSource,
 )
@@ -133,7 +134,9 @@ class ActivityCoordinatorTest(unittest.TestCase):
         self.assertEqual(coordinator.capture_once(9), 1)
         self.assertEqual(coordinator.capture_once(9), 1)
 
-        self.assertGreaterEqual(len(store.spans), 3)
+        # Equal observations update the in-memory span; SQLite only receives
+        # the first sample and the configured persistence heartbeat.
+        self.assertEqual(len(store.spans), 3)
         self.assertEqual(len(api.records), 2)
         self.assertTrue(all(row["session_id"] == 9 for row in api.records))
         self.assertEqual(api.records[0]["payload"]["app"], "Code")
@@ -161,6 +164,25 @@ class ActivityCoordinatorTest(unittest.TestCase):
 
         self.assertNotIn("token", store.spans[0].data)
         self.assertNotIn("token", api.records[0]["payload"])
+
+    def test_privacy_pause_skips_expensive_source_capture(self) -> None:
+        class CountingSource:
+            calls = 0
+
+            def capture(self):
+                self.calls += 1
+                raise AssertionError("paused source should not be called")
+
+        source = CountingSource()
+        coordinator = ActivityCoordinator(
+            FakeAPI(),
+            [source],
+            FakeStore(),
+            privacy_policy=ActivityPrivacyPolicy(paused=True),
+        )
+
+        self.assertEqual(coordinator.capture_once(1), 0)
+        self.assertEqual(source.calls, 0)
 
 
 class MacOSWindowSourceTest(unittest.TestCase):

@@ -115,7 +115,7 @@ class ActivityStore:
         end: datetime,
         bucket_id: str | None = None,
     ) -> list[ActivitySpan]:
-        parameters: list[Any] = [end.isoformat()]
+        parameters: list[Any] = [end.isoformat(), start.isoformat()]
         bucket_filter = ""
         if bucket_id is not None:
             bucket_filter = " AND event.bucket_id = ?"
@@ -128,6 +128,8 @@ class ActivityStore:
                 FROM activity_events AS event
                 JOIN activity_buckets AS bucket ON bucket.id = event.bucket_id
                 WHERE event.start_time < ?
+                  AND julianday(event.start_time)
+                      + (event.duration_seconds / 86400.0) >= julianday(?)
                   {bucket_filter}
                 ORDER BY event.start_time ASC
                 """,

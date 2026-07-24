@@ -28,8 +28,13 @@ terminal or packaged Python application permission under:
 
 If permission is denied, capture errors are logged and the system runtime keeps
 running. No keyboard input, screenshots, OCR, form values, or full document
-contents are captured. The optional Accessibility source reads only a bounded
-set of visible labels, headings, and links every 15 seconds.
+contents are captured by default. The heavier Accessibility text source is
+disabled in `run_demo.py` because enumerating complex Chrome or IDE UI trees can
+cause periodic macOS stalls. Enable it explicitly only for diagnostics:
+
+```bash
+AIDESK_ENABLE_ACCESSIBILITY=1 python3 run_demo.py
+```
 
 The demo routes the macOS sources through `ActivityCoordinator`. It persists
 compact activity spans and continues to emit the existing active-window context
@@ -163,6 +168,11 @@ root:
 python3 -m pip install -r requirements.txt
 python3 run_demo.py
 ```
+
+The demo discovers common ESP32 USB serial ports automatically. Set
+`AIDESK_SERIAL_PORT=/dev/cu...` to select one explicitly. Normal activity
+polling uses a 10-second interval; the optional Chrome extension sends a
+semantic heartbeat every 30 seconds and does not observe every DOM mutation.
 
 The dashboard uses Tkinter and deliberately keeps a plain document/dashboard
 style: system typography, neutral panels, one status color, and no chat or

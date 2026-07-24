@@ -83,8 +83,9 @@ class UIPresentationTest(unittest.TestCase):
 
         text = format_summary(generation)
 
-        self.assertIn("今日活动\n• 实现了时间线展示", text)
-        self.assertIn("明日建议\n• 继续完成 UI 联调", text)
+        self.assertIn("工作轨迹\n• 实现了时间线展示", text)
+        self.assertIn("证据边界\n• 活动主要集中在 Code", text)
+        self.assertIn("下一步\n• 继续完成 UI 联调", text)
         self.assertNotIn("Assistant:", text)
         self.assertNotIn("🤖", text)
 

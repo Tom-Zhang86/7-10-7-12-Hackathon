@@ -94,13 +94,13 @@ def format_summary(generation: SummaryGeneration) -> str:
         summary.focus_assessment,
     ]
     if summary.completed:
-        sections.extend(["", "今日活动"])
+        sections.extend(["", "工作轨迹"])
         sections.extend(f"• {item}" for item in summary.completed)
     if summary.activity_insights:
-        sections.extend(["", "观察"])
+        sections.extend(["", "证据边界"])
         sections.extend(f"• {item}" for item in summary.activity_insights)
     if summary.tomorrow_suggestions:
-        sections.extend(["", "明日建议"])
+        sections.extend(["", "下一步"])
         sections.extend(f"• {item}" for item in summary.tomorrow_suggestions)
     sections.extend(["", summary.data_quality_note])
     return "\n".join(sections)
