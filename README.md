@@ -7,12 +7,10 @@ a single API surface for future modules.
 
 The stable system layer intentionally does not contain AI, UI, serial
 communication, millimeter-wave radar integration, or desktop context capture.
-The separate `application/` package adds an ActivityWatch-inspired local
-activity layer, macOS context capture, optional Chrome page semantics,
-session/activity fusion, rule-first classification, manually triggered AI
-summaries, privacy controls, and a minimal Tkinter dashboard through this public
-API without changing the system-layer core. It does not require ActivityWatch
-and does not use screenshots or OCR.
+The separate `application/` package adds macOS context capture, a reconnecting
+ESP32 USB-serial presence adapter, daily-data aggregation, manually triggered
+AI summaries, and a minimal Tkinter dashboard through this public API without
+changing the system-layer core.
 
 ## Runtime Flow
 
@@ -176,156 +174,16 @@ api.runtime.subscribe("*", on_event)
 ## Application Demo
 
 ```bash
-python3 -m pip install -r requirements.txt
-python3 run_demo.py
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python run_demo.py
 ```
 
-The current MVP targets macOS. Active-window and bounded Accessibility capture
-require Accessibility permission. Chrome semantic capture is optional and has
-a one-time unpacked-extension/native-host setup described in
-`browser_extension/README.md`. Remote classification is opt-in; local rules and
-the rest of the runtime work offline.
+For the hardware demo, wire the radar `OUT` pin to ESP32 `D27`, flash
+`firmware/ai_desk_presence/ai_desk_presence.ino`, and then start the dashboard.
+The application auto-detects common macOS USB serial ports and shows the
+sensor connection state in the header. See `firmware/README.md` for wiring and
+upload instructions.
 
-## Project Direction: Presence-Driven Agent Handoff
-
-### Why activity tracking alone is not enough
-
-The current MVP combines physical seat presence with application, browser, and
-Accessibility metadata to classify time as learning, work, entertainment,
-unknown, or background playback. This is useful, but it is not sufficiently
-distinctive on its own. Existing tools such as ActivityWatch already collect
-active-window, browser, and keyboard/mouse AFK events and support rule-based
-categorization. A millimeter-wave sensor makes the `present`/`away` timeline
-more accurate, but if presence is only stored as another data field, the result
-is still an activity tracker with an additional sensor.
-
-The next goal is therefore **Presence-Driven Agent Handoff**: use a physical
-presence transition to coordinate a safe transfer of a bounded task between a
-human and an AI agent. Instead of only reporting what the user did, AI Desk
-should preserve the user's working state, let an authorized agent make useful
-progress during an interruption, and make returning to the task fast and
-understandable.
-
-This is a planned extension. The repository already provides the presence state
-machine, local activity evidence, semantic classification, privacy controls,
-persistence, and dashboard foundation. Automatic checkpoint creation, agent
-delegation, and return-time recovery are not yet complete.
-
-### What the separate A2A agent is
-
-The worker agent will run as a separate local service rather than being embedded
-inside the presence runtime. The two applications will communicate using
-**A2A (Agent-to-Agent)**, an open protocol for one agent or application to
-discover another agent's capabilities, create a task, follow its state, and
-receive structured results.
-
-In this project, AI Desk is the **orchestrator** and retains control of presence,
-privacy, permission policy, and the user interface. The separate A2A service is
-the **worker**. For the Hackathon MVP, it can expose one narrow capability such
-as `research_handoff`: read the supplied task context, investigate a question,
-and return a concise research brief with sources, findings, uncertainties, and
-suggested next steps. Later workers could support tests, code review, or proposed
-patches without changing the sensor or activity-collection layers.
-
-A2A does not give the worker unrestricted access to the user's computer. AI
-Desk sends an explicit task package and accepts an explicit result artifact.
-This boundary keeps the two projects independently runnable and makes the agent
-replaceable: any compatible worker may be used if it advertises the required
-capability and follows the same task contract.
-
-### Planned handoff workflow
-
-```text
-User working at desk
-        |
-        | local, low-volume context collection
-        v
-Current goal + active project + recent semantic evidence
-        |
-        | sensor reports a stable away transition
-        v
-Checkpoint builder -> permission policy -> A2A task request
-                                           |
-                                           v
-                                  Separate worker agent
-                                           |
-                                           v
-                                  Structured result artifact
-                                           |
-        | sensor reports that the user has returned
-        v
-Safe stop / no new work -> resumption card -> user chooses next action
-```
-
-1. **Present and working.** AI Desk maintains a rolling, privacy-filtered view
-   of the current goal and recent evidence. Useful evidence can include the
-   active application, document or repository name, browser page title and URL
-   domain, current classification, and recent task notes. Continuous screenshots
-   and full-screen OCR are not required.
-2. **Stable away transition.** The existing presence debounce remains important:
-   a brief radar fluctuation must not delegate a task. After the configured
-   absence threshold, AI Desk freezes a small checkpoint instead of sending the
-   user's complete activity history.
-3. **Checkpoint and authorization.** The checkpoint contains a task ID, declared
-   goal, minimal relevant evidence, requested worker capability, allowed actions,
-   time limit, and stop conditions. The policy rejects delegation when there is
-   no clear goal, the evidence is sensitive, or the requested action is outside
-   the user's pre-approved capability set.
-4. **A2A delegation.** AI Desk discovers the worker's advertised capability,
-   submits the checkpoint as an A2A task, and records task-state updates such as
-   submitted, working, completed, failed, or cancelled. The initial MVP should
-   use a research/read-only worker so that the full loop can be demonstrated
-   without granting write access.
-5. **Bounded work while away.** The worker produces a structured artifact rather
-   than an unbounded chat transcript. Every outcome is linked to the checkpoint
-   that caused it. Commits, pushes, external messages, purchases, deletion, and
-   other consequential actions are denied by default and require explicit user
-   approval.
-6. **Return and safe interruption.** A stable return transition tells the
-   orchestrator to cancel or stop starting additional work. If an atomic step is
-   already running, it may finish only within its declared stop policy; the
-   worker must not silently continue after ownership returns to the user.
-7. **Resumption card.** The dashboard shows what the user was doing before the
-   interruption, why the handoff occurred, what the worker attempted, the
-   artifact it produced, unresolved questions, and one or two recommended next
-   actions. The user can accept the result, inspect it, continue manually, or
-   explicitly authorize another task.
-
-### Hackathon MVP boundary
-
-The demo should optimize for one complete, trustworthy loop rather than a large
-set of autonomous tools:
-
-- macOS remains the target desktop platform;
-- the ESP32/radar input supplies debounced `present` and `away` events through
-  the existing public API, without changing the external sensor interface;
-- existing window, browser, and Accessibility metadata supplies a minimal
-  checkpoint; screenshots and OCR remain out of scope;
-- one read-only `research_handoff` A2A worker accepts a structured task and
-  returns a structured artifact;
-- leaving the seat triggers checkpoint and delegation only when the user has
-  enabled it for the current goal;
-- returning triggers safe stop and a dashboard resumption card;
-- all handoff events and worker results are stored locally in an auditable
-  timeline.
-
-The intended demonstration is: start a declared research task, work briefly,
-leave the seat, watch AI Desk create and delegate a checkpoint, let the worker
-produce a cited brief, return, and immediately receive a compact explanation of
-what changed and what decision is needed next.
-
-### Most meaningful Hackathon innovations
-
-1. **Physical presence becomes a task-ownership signal, not merely an AFK
-   metric.** Existing activity trackers answer "what application was active?"
-   and desktop agents answer "what task should I run?" AI Desk connects the two:
-   a verified physical transition initiates a governed human-to-agent handoff,
-   and the return transition gives ownership back to the human. The sensor is
-   therefore part of the collaboration protocol rather than a reporting add-on.
-2. **A reversible, evidence-minimized handoff loop.** AI Desk delegates a small
-   semantic checkpoint under an explicit capability policy, receives a
-   structured and auditable artifact through A2A, safely stops on return, and
-   presents a resumption card. The innovation is not a new sensor, tracker, or
-   model in isolation; it is a privacy-conscious interaction model that turns
-   interruptions into controlled, reviewable agent work without requiring
-   continuous screen recording or unrestricted computer access.
+Set `AI_DESK_SERIAL_PORT` in `.env` only when automatic port discovery is not
+sufficient. The default baud rate is 115200.
