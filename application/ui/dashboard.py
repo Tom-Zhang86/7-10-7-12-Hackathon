@@ -15,6 +15,8 @@ from application.ui.presentation import (
     format_summary,
     present_status,
 )
+from events.event_types import PresenceDetected, PresenceLost
+from models.state import PresenceState
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +84,8 @@ class DashboardApp:
         self._timeline_refresh_requested = True
         self._timeline_refresh_ticks = 0
         self._timeline_signature: tuple[tuple[str, str, str], ...] | None = None
+        self._displayed_state = PresenceState.IDLE
+        self._presence_change_pending = False
         self._closing = False
 
         self.status_var = tk.StringVar(value="● 空闲")
@@ -178,6 +182,12 @@ class DashboardApp:
             font=("Helvetica Neue", 12, "bold"),
         )
         self.status_label.pack(side="right", pady=(8, 0))
+        self.pause_button = ttk.Button(
+            header,
+            text="开始工作",
+            command=self._toggle_pause,
+        )
+        self.pause_button.pack(side="right", padx=(0, 14), pady=(4, 0))
         if (
             self.provider_settings is not None
             and self.configurable_llm_client is not None
@@ -408,9 +418,12 @@ class DashboardApp:
                 self.root.after(1000, self._request_dashboard_refresh)
 
     def _apply_dashboard_snapshot(self, snapshot: DashboardSnapshot) -> None:
+        self._displayed_state = snapshot.state
+        self._presence_change_pending = False
         status = present_status(snapshot.state)
         self.status_var.set(f"● {status.label}")
         self.status_label.configure(fg=status.color)
+        self._refresh_pause_button()
         self._refresh_sensor_status()
         self.work_var.set(
             format_duration(snapshot.stats.get("total_work_seconds", 0))
@@ -421,6 +434,41 @@ class DashboardApp:
         self.break_var.set(str(snapshot.stats.get("break_count", 0)))
         if snapshot.timeline_rows is not None:
             self._apply_timeline_rows(snapshot.timeline_rows)
+
+    def _refresh_pause_button(self) -> None:
+        if self._displayed_state == PresenceState.WORKING:
+            text = "暂停"
+            state = "normal"
+        elif self._displayed_state in {PresenceState.IDLE, PresenceState.BREAK}:
+            text = "继续工作"
+            state = "normal"
+        else:
+            text = "今日已结束"
+            state = "disabled"
+        if self._presence_change_pending:
+            text = "正在切换…"
+            state = "disabled"
+        self.pause_button.configure(text=text, state=state)
+
+    def _toggle_pause(self) -> None:
+        if self._presence_change_pending:
+            return
+        self._presence_change_pending = True
+        self._refresh_pause_button()
+
+        if self._displayed_state == PresenceState.WORKING:
+            if self.presence_adapter is not None:
+                self.presence_adapter.pause()
+            else:
+                self.api.post_event(PresenceLost())
+        elif self._displayed_state in {PresenceState.IDLE, PresenceState.BREAK}:
+            if self.presence_adapter is not None:
+                self.presence_adapter.resume()
+            else:
+                self.api.post_event(PresenceDetected())
+        else:
+            self._presence_change_pending = False
+            self._refresh_pause_button()
 
     def _refresh_sensor_status(self) -> None:
         if self.presence_adapter is None:
@@ -474,14 +522,6 @@ class DashboardApp:
     def _request_summary(self) -> None:
         if self._summary_future and not self._summary_future.done():
             return
-        if self.provider_settings is not None:
-            selection = self.provider_settings.load()
-            if not self.provider_settings.get_api_key(
-                selection.provider_id
-            ):
-                self.summary_meta_var.set("请先连接 AI")
-                self._open_provider_settings()
-                return
         self.generate_button.configure(state="disabled")
         self.summary_meta_var.set("正在生成…")
         self._summary_future = self.summary_service.generate_today_async()
@@ -500,11 +540,7 @@ class DashboardApp:
 
         selection = self.provider_settings.load()
         provider = get_provider(selection.provider_id)
-        has_key = bool(
-            self.provider_settings.get_api_key(selection.provider_id)
-        )
-        state = "已连接" if has_key else "未连接"
-        self.ai_provider_var.set(f"AI：{provider.label} · {state}")
+        self.ai_provider_var.set(f"AI：{provider.label}")
 
     def _poll_summary(self) -> None:
         if self._closing or self._summary_future is None:
