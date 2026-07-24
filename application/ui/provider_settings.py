@@ -26,6 +26,9 @@ class ProviderSettingsDialog:
         self.validator = validator
         self.on_saved = on_saved
         self._future: Future[Any] | None = None
+        self._key_future: Future[str | None] | None = None
+        self._key_lookup_provider_id: str | None = None
+        self._stored_keys: dict[str, str | None] = {}
         self._executor = ThreadPoolExecutor(
             max_workers=1,
             thread_name_prefix="provider-settings",
@@ -49,7 +52,7 @@ class ProviderSettingsDialog:
 
         self._build()
         self._refresh_models()
-        self._show_stored_key_state()
+        self._request_stored_key_state()
         self.window.after(20, self.window.focus_force)
 
     def _build(self) -> None:
@@ -149,7 +152,7 @@ class ProviderSettingsDialog:
         self._selection_model_id = self._selected_provider().default_model
         self.api_key_var.set("")
         self._refresh_models()
-        self._show_stored_key_state()
+        self._request_stored_key_state()
 
     def _refresh_models(self) -> None:
         provider = self._selected_provider()
@@ -166,19 +169,57 @@ class ProviderSettingsDialog:
         self.model_var.set(selected)
         self.api_key_entry.configure()
 
-    def _show_stored_key_state(self) -> None:
+    def _request_stored_key_state(self) -> None:
         provider = self._selected_provider()
-        if self.settings.get_api_key(provider.id):
+        cached_key = self._stored_keys.get(provider.id)
+        if provider.id in self._stored_keys:
+            self._show_stored_key_state(provider.id, cached_key)
+            return
+        self.status_var.set("正在检查钥匙串…")
+        self.status_label.configure(foreground="#666666")
+        self.disconnect_button.configure(state="disabled")
+        self._key_lookup_provider_id = provider.id
+        self._key_future = self._executor.submit(
+            self.settings.get_api_key,
+            provider.id,
+        )
+        self.window.after(50, self._poll_stored_key_state)
+
+    def _poll_stored_key_state(self) -> None:
+        if self._key_future is None or not self.window.winfo_exists():
+            return
+        if not self._key_future.done():
+            self.window.after(50, self._poll_stored_key_state)
+            return
+        provider_id = self._key_lookup_provider_id
+        try:
+            key = self._key_future.result()
+        except Exception as exc:
+            key = None
+            self.status_var.set(f"无法读取钥匙串：{exc}")
+            self.status_label.configure(foreground="#B42318")
+        finally:
+            self._key_future = None
+        if provider_id is None:
+            return
+        self._stored_keys[provider_id] = key
+        if self._selected_provider().id == provider_id:
+            self._show_stored_key_state(provider_id, key)
+
+    def _show_stored_key_state(
+        self,
+        provider_id: str,
+        stored_key: str | None,
+    ) -> None:
+        provider = get_provider(provider_id)
+        if stored_key:
             self.status_var.set("已在钥匙串中保存此服务商的 API Key。")
         else:
             self.status_var.set(f"请输入 API Key（例如 {provider.key_hint}）。")
         self.status_label.configure(foreground="#666666")
-        self._refresh_disconnect_button()
+        self._refresh_disconnect_button(bool(stored_key))
 
-    def _refresh_disconnect_button(self) -> None:
-        has_key = bool(
-            self.settings.get_api_key(self._selected_provider().id)
-        )
+    def _refresh_disconnect_button(self, has_key: bool = False) -> None:
         self.disconnect_button.configure(
             state="normal" if has_key else "disabled"
         )
@@ -200,7 +241,7 @@ class ProviderSettingsDialog:
         provider = self._selected_provider()
         key = self.api_key_var.get().strip()
         if not key:
-            key = self.settings.get_api_key(provider.id) or ""
+            key = self._stored_keys.get(provider.id) or ""
         if not key:
             messagebox.showwarning(
                 "缺少 API Key",
@@ -231,8 +272,9 @@ class ProviderSettingsDialog:
         ):
             return
         self.settings.delete_api_key(provider.id)
+        self._stored_keys[provider.id] = None
         self.api_key_var.set("")
-        self._show_stored_key_state()
+        self._show_stored_key_state(provider.id, None)
         self.status_var.set(f"已断开 {provider.label}。")
         if self.on_saved:
             self.on_saved()
@@ -264,6 +306,10 @@ class ProviderSettingsDialog:
             return
 
         provider = get_provider(selection.provider_id)
+        self._stored_keys[selection.provider_id] = (
+            self.api_key_var.get().strip()
+            or self._stored_keys.get(selection.provider_id)
+        )
         self.status_var.set(f"已连接 {provider.label}，设置已保存。")
         self.status_label.configure(foreground="#24734A")
         self.connect_button.configure(state="normal")
