@@ -480,3 +480,610 @@ python -m unittest discover -s tests -v
 The protocol integration test uses a deterministic model stub; the final stage
 rehearsal should still be performed once with the real OpenAI and OpenAlex keys,
 the real Mac notification/report flow, and the intended ESP32 hardware.
+
+## AI Desk V2 — Owner-Authorized Handoff (Phases 1-5)
+
+`application/owner_handoff/` is a new, self-contained package implementing
+the identity-aware, presence-triggered, sandboxed agent handoff orchestrator
+described in
+[`docs/AI_DESK_V2_MASTER_SPEC.md`](docs/AI_DESK_V2_MASTER_SPEC.md). It does
+not change any behavior described elsewhere in this README — the Dashboard,
+the presence-aware A2A Research Handoff MVP above, and every existing
+public API are untouched. The target platform is macOS, but every test in
+this package is deterministic and hardware-free.
+
+**Phase 5 — Phase 4 repair gate + release-candidate demo polish.** Full
+detail — including everything still deferred and every known limitation —
+lives in
+[`application/owner_handoff/README.md`](application/owner_handoff/README.md),
+[`docs/AI_DESK_V2_PHASE1_REPORT.md`](docs/AI_DESK_V2_PHASE1_REPORT.md),
+[`docs/AI_DESK_V2_PHASE2_REPORT.md`](docs/AI_DESK_V2_PHASE2_REPORT.md),
+[`docs/AI_DESK_V2_PHASE3_REPORT.md`](docs/AI_DESK_V2_PHASE3_REPORT.md),
+[`docs/AI_DESK_V2_PHASE4_REPORT.md`](docs/AI_DESK_V2_PHASE4_REPORT.md), and
+[`docs/AI_DESK_V2_PHASE5_REPORT.md`](docs/AI_DESK_V2_PHASE5_REPORT.md). The
+short version:
+
+**Implemented:** centralized configuration (`config.py`), domain models
+(`domain/activity.py`, `domain/work_context.py`, `domain/presence.py`,
+`domain/question.py`, `domain/execution.py`, `domain/manifest.py`,
+`domain/resume.py`), the full 13-state persisted state machine and its
+SQLite-backed event ledger (`state_machine.py`, `store.py`), Tier 1 activity
+classification and Tier 2 context analysis (`classification/`), the OCR
+interface plus its fixed, mandatory invocation order (`adapters/ocr.py`,
+`classification/ocr_policy.py` — no-op and mock only; **no real OCR is
+implemented**), deterministic radar/wearable simulators (`adapters/radar.py`,
+`adapters/wearable.py`), leave/return presence fusion (`fusion/`), the
+handoff-question generator, wearable-answer lifecycle, and Terminal renderer
+(`questions/`), conservative skill routing (`routing/`), physical workspace
+duplication with path-safety policy (`workspace/`), the deny-by-default
+execution policy, one-time-use permission binding bound to exactly what the
+owner saw (`execution/permission.py`), Research Agent executor adapter,
+Codex CLI preflight/executor with a real cancellable execution session
+(`return_coordinator.ExecutionSession`) and a hardened subprocess adapter
+(real subprocess adapters exist but are never invoked by any test), and
+controlled package installer (`execution/`); the top-level orchestrator
+(`orchestrator.py`) composing every one of the above behind deterministic,
+explicitly-called methods, including fail-closed handling for duplication/
+executor/verification failures and terminal-task acknowledgment; the return
+coordinator (`return_coordinator.py`) and fixed-shape resume report
+(`domain/resume.py`, plus `SafetyFailureRecord` for verification failures);
+sanitized, atomic task-artifact persistence (`persistence.py`); and a fully
+deterministic, hardware-free Terminal demo (`demo_workspace/`,
+`run_owner_handoff_demo.py`) with a visibly meaningful default coding
+executor, a responsive background `run`/`wait` flow, and a safe
+`--preflight-only` mode.
+
+**Explicitly deferred (not implemented):** a real serial radar reader, real
+BLE (and any BLE UUIDs), real Codex CLI/package-install execution during
+development or in any automated test (every test uses a fake runner; the
+real subprocess adapters exist and are reachable only via explicit
+human-invoked `--executor codex` / real package installs), real macOS
+notifications, and any Dashboard/summary integration. **No macOS hardware
+verification, and no real-Codex-CLI verification, has been performed for
+any of this** — everything is fully deterministic, in-process, and
+hardware-free in this repository's own test suite.
+
+### Configuration
+
+| Field | Env var | Default |
+|---|---|---|
+| `owner_leave_confirmation_seconds` | `AI_DESK_V2_LEAVE_CONFIRM_SECONDS` | `10` |
+| `input_idle_threshold_seconds` | `AI_DESK_V2_INPUT_IDLE_SECONDS` | `5` |
+| `handoff_question_expiration_seconds` | `AI_DESK_V2_QUESTION_EXPIRY_SECONDS` | `60` |
+| `coding_agent_max_runtime_seconds` | `AI_DESK_V2_CODING_MAX_RUNTIME_SECONDS` | `300` |
+| `coding_agent_max_safe_steps` | `AI_DESK_V2_CODING_MAX_STEPS` | `20` |
+| `owner_handoff_db_path` | `AI_DESK_V2_DB_PATH` | `data/owner_handoff.sqlite3` |
+| `workspace_session_root` | `AI_DESK_V2_SESSION_ROOT` | `data/owner_handoff/sessions` |
+| `ocr_adapter_mode` | `AI_DESK_V2_OCR_MODE` | `noop` (`mock` for tests/simulator dev) |
+| `wearable_device_allowlist` | `AI_DESK_V2_WEARABLE_DEVICE_IDS` | `()` (empty — rejects every answer until configured) |
+
+The 5-second input idle threshold is not a second timer racing the
+10-second confirmation window: owner leave is confirmed (via
+`LeaveDetector`, since Phase 2) after input has been idle for 5 seconds
+*and* all four absence conditions then remain true, continuously, for the
+full 10-second window — about 15 seconds total in the common case.
+
+The following are **mandatory safety invariants, not configurable values**,
+and have no environment variable: wearable `UNKNOWN` never triggers;
+contradictory signals always wait; external actions remain denied in v1;
+OCR is callable only after Tier 1 and Tier 2 both remain `AMBIGUOUS`; an
+unanswered/timed-out handoff question always resolves to D ("Do nothing");
+a missing/unusable Codex CLI always stops safely; missing Codex isolation
+support always fails closed; the original workspace is never writable; Git
+push/publish/message/deploy remain prohibited. See
+`docs/AI_DESK_V2_MASTER_SPEC.md`, "Phase 1 Review Addendum."
+
+### Running the tests
+
+```bash
+python -B -m unittest discover -s tests -v
+```
+
+Every test in this package is deterministic — no real network, hardware,
+BLE, OCR, Codex CLI, or package installer is ever called.
+
+See the **"AI Desk V2 — macOS demo"** section at the end of this README for
+the full partner setup/run walkthrough, including the deterministic fake
+demo, the optional real-Research and real-Codex modes, and every hard-coded
+timing/limit default.
+
+---
+
+# AI Desk V2 — macOS demo
+
+This is the Phase 5 release-candidate walkthrough for
+`application/owner_handoff/`. Use this section for the current
+Owner-Authorized Handoff product demo; the earlier `run_handoff_demo.py`
+walkthrough is the retained, research-only MVP path.
+
+**Target platform: macOS.** The deterministic path is platform-independent,
+has been reviewed for macOS path/subprocess behavior, and runs with zero real
+hardware, BLE, OCR, or (in the default mode) network access. A real Mac,
+Codex CLI, BLE wearable, and radar have not all been exercised together yet;
+see "macOS release gate" below for the exact remaining device-level check.
+
+## 1. Set up a Python virtual environment
+
+```bash
+cd 7-10-7-12-Hackathon
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+## 2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+`run_owner_handoff_demo.py` and its default (`--executor fake --research
+fake`) path need nothing beyond this repo's own `requirements.txt` — no
+extra package is required for the deterministic demo.
+
+## 3. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Every `AI_DESK_V2_*` value in `.env` is optional (defaults match the Master
+Spec — see the Configuration table above). **`OPENAI_API_KEY` and the A2A
+agent settings are only required for the optional real-Research mode below
+— the default fake demo needs no keys, no `.env` edits, and no network at
+all.** `run_owner_handoff_demo.py` loads this repository-level `.env` at
+startup and does not override variables already exported by the operator.
+
+## 4. Optional: start the Research Agent (only for real Research mode)
+
+Only needed if you intend to pass `--research real`. In a separate
+terminal, from the `agent-skeleton` checkout:
+
+```bash
+# In agent-skeleton
+python3 -m agent_skeleton --host 127.0.0.1 --port 9110
+```
+
+Check its Agent Card resolves before trusting real-Research mode:
+
+```bash
+curl -s http://127.0.0.1:9110/.well-known/agent-card.json | head -c 500
+```
+
+## 5. Optional: install and check Codex CLI (only for real Codex mode)
+
+Only needed if you intend to pass `--executor codex`. Installation and login
+are explicit, human-run prerequisites; AI Desk never installs Codex CLI for
+the user. Follow the current official
+[Codex CLI documentation](https://learn.chatgpt.com/docs/codex/cli). One
+official macOS/Linux installation path is:
+
+```bash
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+codex login
+codex login status
+```
+
+Then verify it manually (never done automatically by this repo):
+
+```bash
+codex --version
+codex exec --help
+```
+
+`CodexPreflight` (see `execution/codex_cli.py`) re-runs exactly these two
+commands at startup and fails closed if the installed CLI doesn't advertise
+every flag this executor requires (`--sandbox`, `--cd`, `--ephemeral`,
+`--json`, `--ignore-user-config`, `--skip-git-repo-check`, `--strict-config`,
+`-c`/`--config`).
+
+## 6. Run the deterministic demo (default, recommended first run)
+
+```bash
+python3 run_owner_handoff_demo.py \
+  --simulate \
+  --workspace demo_workspace/sample_project \
+  --executor fake
+```
+
+This starts an interactive prompt (`aidesk>`). Useful commands (type `help`
+for the full list):
+
+| Command | Effect |
+|---|---|
+| `start <task_id>` | Create and activate one handoff task |
+| `away` | Set radar/wearable to absent and deterministically advance the internal fake clock through the idle + confirmation windows |
+| `ask` | Generate and display the full handoff question in Terminal |
+| `select A` / `select B` / `select D` | Submit that option (the wearable only ever sends back `question_id` + the letter) |
+| `grant` / `deny` | Answer YES/NO to whichever permission question (CODEX_DATA or PACKAGE_INSTALL) is currently pending |
+| `run` | Start the routed coding/research step in the background and return immediately -- `status`/`return` remain usable while it runs |
+| `wait [timeout_seconds]` | Block until the running step finishes (default 30s) and print its result |
+| `install <spec>` | Request a PACKAGE_INSTALL authorization for an exact package spec, mid-execution |
+| `return` | Simulate the owner returning |
+| `finalize [text]` | Produce the resume report (JSON, exact fixed shape) |
+| `deliver` | Return control to the owner |
+| `status` | Print task id/state/routed skill/duplicate path/return-requested/execution status (safe to call with no active task) |
+| `report` | Reload and print the exact persisted report for the current task (e.g. after `attach`-ing post-restart) |
+| `acknowledge` | Free this process for a new `start` after a CANCELED/FAILED task (RETURNED already does this via `deliver`) |
+
+A full scripted run (non-interactive, e.g. for a recording or a `--script
+path/to/commands.txt` file of one command per line):
+
+```
+start demo-task
+away
+ask
+select A
+grant
+run
+status
+wait
+finalize Fixed the calculator add bug
+deliver
+```
+
+`select A` routes to **coding** (the seeded bug in
+`demo_workspace/sample_project/calculator.py` -- the default fake executor
+actually fixes it in the duplicate); `select B` routes to **research**;
+`select D` does nothing, ever, and cancels cleanly.
+
+To exercise a return arriving mid-execution instead, call `return` right
+after `run` (before `wait`) -- if it arrives before the step has actually
+started, the step is correctly refused rather than started; either way,
+`wait` reports the outcome honestly instead of assuming success.
+
+### Exactly when the CODEX_DATA question appears
+
+Only after: a coding-routed option is selected -> the workspace is
+physically duplicated (`WORKSPACE_DUPLICATING`) -> **then** the CODEX_DATA
+permission question is asked (`PERMISSION_PENDING`). Codex (real or fake)
+never starts before a matching YES to that exact question, for that exact
+task/session/duplicate.
+
+### Where things are written
+
+- Duplicate workspaces: under `--session-root` (default
+  `data/owner_handoff/sessions/<session-id>/`) — never inside
+  `demo_workspace/` itself, never deleted automatically by AI Desk.
+- The task/event ledger: `--db-path` (default `data/owner_handoff.sqlite3`).
+- Task artifacts (the duplication manifest, the routed selected task, the
+  sanitized execution result, approved package installs, and the final
+  report/failure) are persisted as sanitized JSON under
+  `<session-root>/<task_id>.artifacts/` — never inside `demo_workspace/` —
+  written atomically and never containing a secret/token/raw environment
+  value. The `finalize` command also prints the report to the terminal as
+  JSON; `report` reloads and reprints the persisted copy at any later time,
+  including after a simulated restart (see `attach_to_task` in
+  `orchestrator.py`).
+
+### Inspecting duplicate changes, and why nothing is merged back
+
+```bash
+diff -ru demo_workspace/sample_project data/owner_handoff/sessions/<session-id>/
+```
+
+**Nothing is ever copied or merged back into `demo_workspace/`
+automatically** — review the duplicate, then apply whatever you approve by
+hand. This is intentional, not a missing feature.
+
+## 7. Optional: real Research mode
+
+Requires step 4 running and reachable.
+
+```bash
+python3 run_owner_handoff_demo.py \
+  --simulate \
+  --workspace demo_workspace/sample_project \
+  --executor fake \
+  --research real \
+  --agent-url http://127.0.0.1:9110
+```
+
+## 8. Optional: real Codex mode
+
+Requires step 5's Codex CLI installed and verified. **This actually invokes
+a real `codex exec` subprocess** (sandboxed, network-disabled, scoped to the
+physical duplicate, and only after a matching CODEX_DATA YES) — treat any
+output as something that needs a human review before trusting it, exactly
+like the rest of this section's "defense in depth, not proof" framing for
+Codex JSONL inspection.
+
+```bash
+python3 run_owner_handoff_demo.py \
+  --simulate \
+  --workspace demo_workspace/sample_project \
+  --executor codex \
+  --codex-binary codex
+```
+
+## Hard-coded defaults (all documented, most overridable via `.env`)
+
+| Parameter | Default | Overridable? |
+|---|---|---|
+| Owner-leave idle threshold | 5s | `AI_DESK_V2_INPUT_IDLE_SECONDS` |
+| Owner-leave confirmation window | 10s | `AI_DESK_V2_LEAVE_CONFIRM_SECONDS` |
+| Handoff/permission question expiry | 60s | `AI_DESK_V2_QUESTION_EXPIRY_SECONDS` |
+| Codex max runtime | 300s | `AI_DESK_V2_CODING_MAX_RUNTIME_SECONDS` |
+| Codex max safe steps | 20 | `AI_DESK_V2_CODING_MAX_STEPS` |
+| Return grace period (finish the current atomic step) | 30s | fixed constant (`ReturnCoordinator(return_grace_period_seconds=...)`), not env-configurable |
+| Return-coordinator step poll interval | 0.05s | fixed constant (`return_coordinator._STEP_POLL_SECONDS`) |
+| Post-terminate extra wait (only when a real `terminate_fn` was called) | 0.1s | fixed constant (`return_coordinator._POST_TERMINATE_GRACE_SECONDS`) |
+| Clock-skew tolerance for wearable answers | 5s | fixed constant (`CLOCK_SKEW_TOLERANCE_SECONDS`) |
+| Codex JSONL poll interval (how often the executor re-checks its own runtime budget) | 1.0s | fixed constant (`execution/codex_cli._POLL_INTERVAL_SECONDS`) |
+| Codex JSONL: retained events / retained text per string | 200 events / 2000 chars | fixed constants in `execution/codex_cli.py` |
+| Codex subprocess stdout event queue size / stderr tail buffer | 500 lines / 20,000 chars | fixed constants (`_SubprocessCodexProcessHandle`) |
+| Codex process SIGTERM -> SIGKILL escalation wait | 5s (each stage) | fixed constant (`_SubprocessCodexProcessHandle._TERMINATE_WAIT_SECONDS`) |
+| Codex preflight command timeout | 15s | fixed constant (`SubprocessCommandRunner`) |
+| Package install subprocess timeout | 300s | fixed constant (`SubprocessInstallerCommandRunner`) |
+| A2A (real Research mode) request timeout | 180s | `AI_DESK_A2A_TIMEOUT_SECONDS` (existing Research Handoff MVP setting, reused unchanged) |
+
+## Optional: Codex preflight-only mode
+
+To check an installed Codex CLI's isolation-flag support without creating
+any duplicate, task database, CODEX_DATA question, or A2A contact:
+
+```bash
+python3 run_owner_handoff_demo.py \
+  --workspace demo_workspace/sample_project \
+  --executor codex \
+  --preflight-only
+```
+
+This runs only `codex --version` and `codex exec --help`, reports which
+required flags (`--sandbox`, `--cd`, `--ephemeral`, `--json`,
+`--ignore-user-config`, `--skip-git-repo-check`, `--strict-config`,
+`-c`/`--config`) the installed CLI advertises, and exits — structurally, it
+never constructs an orchestrator, a store, or a workspace duplicator, so it
+cannot reach any of those side effects even accidentally. `--workspace` is
+still required (never defaulted) even though this mode doesn't read it, to
+keep the CLI's "mandatory workspace" contract uniform across modes.
+
+## Current limitations
+
+- Wearable and desk radar are **simulators only** — no real BLE, no real
+  serial reader (this stays true even in `--executor codex` mode).
+- The only UI is this Terminal REPL — no Dashboard/summary integration.
+- No OCR fallback is implemented (`ocr_adapter_mode` is `noop`/`mock` only).
+- Real Codex execution (`--executor codex`) is a real subprocess call —
+  every layer here (sandbox, network-disabled, physical duplicate, fixed
+  prompt policy, post-hoc manifest re-hashing, the installer gate) is
+  defense in depth, not a formal guarantee; **treat any real Codex rehearsal
+  as requiring explicit human review of the diff before trusting it.** In
+  particular, post-hoc JSONL event inspection (including the
+  prohibited-command check) can stop the stream and fail the task before
+  accepting further steps, but it cannot prevent the sandbox from having
+  allowed the first occurrence of a command in the first place.
+- Return/cancellation semantics: the "current atomic step" is one
+  `CodingAgentExecutor`/`ResearchAgentExecutor` call. A cooperative
+  executor (`CodexCLIExecutor`, the demo's fake executors) checks for a
+  confirmed return between its own internal steps and stops promptly; an
+  uncooperative or uncancelable step (e.g. a real in-flight A2A request)
+  is bounded by the return grace period and then honestly reported as
+  "did not finish in time" rather than falsely claimed as terminated — it
+  may still be running, abandoned on its own background thread, which can
+  never block process exit.
+- Task artifacts (manifest, selected task, execution result, approved
+  package installs, final report) are persisted under
+  `<session-root>/<task_id>.artifacts/`, but this repository does not run
+  a real multi-process restart drill — restart-recovery/reload behavior is
+  covered by same-process, simulated-restart tests only (a fresh
+  orchestrator instance sharing the same store/session-root).
+- `--workspace` accepts any existing, non-root, non-home directory outside
+  `workspace_session_root` — the safety boundary is path-policy validation
+  (`validate_demo_output_paths`/`validate_source_path`), not a restriction
+  to the checked-in `demo_workspace/` fixture; pointing it at a real
+  project is supported, but review the resulting duplicate before trusting
+  or applying anything from it.
+
+## Product logic in one page
+
+AI Desk V2 is not an activity logger that happens to start an agent. Presence
+is part of the authorization control plane:
+
+```text
+mouse + keyboard + active app
+             |
+             v
+  work classification/context -----> optional OCR only if still ambiguous
+             |
+radar absent + owner wearable away + input idle for 5s + stable for 10s
+             |
+             v
+     OWNER_LEFT_CONFIRMED
+             |
+   contextual A/B/C/D question on Mac
+             |
+ owner answers on identity-bound wearable
+       |                         |
+       | research                | coding
+       v                         v
+  A2A Research Agent     physical workspace duplicate
+                         + separate CODEX_DATA YES/NO
+                         + sandboxed Codex CLI
+       |                         |
+       +------------+------------+
+                    v
+      owner returns -> stop new steps -> verify original
+                    -> persist resume report -> return control
+```
+
+Important distinctions:
+
+- The radar answers "is somebody at the desk?"; it does not identify the
+  owner.
+- The wearable answers "is the owner nearby?" and returns explicit
+  A/B/C/D or YES/NO authorization.
+- Conflicting or unknown signals wait. One missing/disconnected signal never
+  silently becomes authorization.
+- Research receives only a selected task capsule. Coding receives only an
+  explicitly approved physical duplicate. The original workspace is never
+  modified or automatically merged back.
+
+## Current interfaces and integration boundary
+
+The domain interfaces are implemented and tested; the real radar/BLE
+transports are deliberately still replaceable adapters.
+
+| Boundary | Current callable interface | Current implementation |
+|---|---|---|
+| Desk presence | `RadarSensor.read() -> RadarSample` | `SimulatorRadar`; real serial adapter deferred |
+| Owner wearable | `read_proximity()`, `send_question(question_id, letters)`, `poll_answer()` | `WearableSimulator`; real BLE adapter deferred |
+| Activity understanding | Tier 1 classifier -> Tier 2 context analyzer -> OCR provider | classifier/analyzer plus `noop`/`mock` OCR only |
+| Research | `A2AClientProtocol.send_task(TaskCapsule) -> A2AResult` | wrapper around existing `A2AHandoffClient`; fake or localhost real mode |
+| Coding | `CodingAgentExecutor.execute(CodingTaskRequest) -> ExecutionResult` | meaningful deterministic demo executor or real `CodexCLIExecutor` |
+| Package installation | exact package specs + exact argv + separate YES/NO permit | simulated runner in the demo; real subprocess adapter exists but is not enabled by the demo CLI |
+| User interface | commands documented in step 6 | Terminal only; Dashboard integration deferred |
+| Persistence | SQLite state/event ledger plus sanitized atomic JSON artifacts | implemented under `data/owner_handoff/` by default |
+
+Wearable privacy is intentionally narrow: `send_question` receives only a
+`question_id` and the available letters. The full work context and option text
+remain on the Mac. A future physical transport must produce these domain
+values:
+
+```text
+proximity: OWNER_NEAR | OWNER_AWAY | UNKNOWN
+answer:    device_id + question_id + (A|B|C|D|YES|NO) + timestamp
+```
+
+BLE Service/Characteristic UUIDs, pairing, RSSI hysteresis, reconnect rules,
+transport replay protection, and button debounce are not finalized in this
+repository. They must be documented with the firmware instead of being
+invented independently in the Mac adapter.
+
+## Recommended hackathon hardware configuration
+
+| Role | Recommended hardware | Why |
+|---|---|---|
+| Desk presence | Existing Arduino + the already-wired presence sensor | Reuses the working sensor and keeps person-at-desk detection separate from identity |
+| Primary wearable | LCKFB Huangshan Pi / HSPI-SF32LB52 | Watch-like form, touch display, battery support, buttons/vibration; strongest stage presentation |
+| Low-risk wearable fallback | LCKFB ESP32-S3R8N8 + one/two buttons + LED + small USB power bank | Familiar Arduino BLE path and much lower SDK risk |
+| Orchestrator | macOS laptop | Runs this repo, Terminal question UI, A2A client, and optional Codex CLI |
+| Enclosure | 3D-printed wrist or badge enclosure | Build only after communication works; cosmetic, not a software dependency |
+
+Official references:
+
+- [Huangshan Pi hardware](https://wiki.lckfb.com/zh-hans/hspi-sf32lb52/hardware/board.html)
+- [Huangshan Pi SDK setup](https://wiki.lckfb.com/zh-hans/hspi-sf32lb52/lckfb-hspi-sf32lb52/environment.html)
+- [LCKFB ESP32-S3 Arduino BLE example](https://wiki.lckfb.com/zh-hans/esp32s3r8n8/arduino-beginner/bluetooth.html)
+
+Use a two-hour Huangshan Pi go/no-go gate: keep it only if the team can flash
+an example, use touch/buttons, run from battery, and deliver one message to
+the Mac. Otherwise switch immediately to ESP32-S3. Do not add RDK vision or an
+Insta360 camera to the MVP: neither is needed to demonstrate owner identity
+and authorization, and both expand privacy and integration risk.
+
+For the ESP32-S3 fallback, one button is sufficient: short press cycles
+A/B/C/D, long press confirms, and double press cancels. The Mac always shows
+the complete question. The wearable should never store OpenAI credentials or
+call an AI API directly.
+
+## Recommended hackathon demo sequence
+
+### Reliable stage path available now
+
+1. Run the deterministic demo from step 6 and show the original failing
+   calculator test.
+2. Enter `away`; explain that four signals are fused in production, while
+   this command advances the deterministic sensor simulator.
+3. Enter `ask`; show the contextual options and the minimal wearable payload.
+4. Enter `select A`, then `grant`; distinguish task choice from the separate
+   Codex data authorization.
+5. Enter `run`, `status`, and `wait`; show that the change exists only in the
+   duplicate workspace.
+6. Enter `return`, `finalize`, and `deliver`; show
+   `original_files_modified: []` and the resumable report.
+
+### Intended physical stage path after adapters are added
+
+1. Arduino sensor reports the desk empty while the wearable reports the owner
+   away; mouse and keyboard remain idle through the configured windows.
+2. Mac displays the full context-derived question; wearable displays or
+   cycles only A/B/C/D.
+3. Owner answers physically. Coding additionally asks YES/NO before Codex can
+   see the duplicate; Research sends only the selected task capsule over A2A.
+4. On return, AI Desk stops starting new steps, finishes or bounds the current
+   step, verifies the original workspace, and presents the resume report.
+
+Keep the deterministic Terminal path ready as the on-stage fallback even
+after hardware is connected.
+
+## Hackathon innovation points
+
+Use these two claims; they correspond directly to implemented architecture
+rather than a generic "AI productivity" pitch:
+
+1. **Presence becomes an authorization primitive.** AI Desk combines physical
+   desk presence, owner-bound proximity, computer input, and explicit wearable
+   consent to decide when an agent may take over. It does not merely record
+   that the user was away.
+2. **Safe, reversible human-agent handoff across specialist agents.** A2A
+   research gets a minimal task capsule; coding gets a freshly hashed physical
+   duplicate only after a second data permit. Owner return closes the autonomy
+   window and produces a verifiable resume artifact with the original-file
+   modification list structurally empty.
+
+The key contrast with ActivityWatch is therefore not finer activity
+classification. Activity history supplies context; AI Desk turns identity,
+presence, and physical consent into a bounded handoff protocol for acting
+agents.
+
+## macOS compatibility status and release gate
+
+The code-level audit found no Windows-only dependency in the V2 default path:
+
+- Python paths use `pathlib`; SQLite and atomic `os.replace` are available on
+  macOS.
+- Package-interpreter selection uses `<duplicate>/.venv/bin/python` on
+  macOS/Linux.
+- Real Codex processes start in their own POSIX session and use a bounded
+  process-group `SIGTERM` then `SIGKILL` fallback.
+- Research mode uses a localhost HTTP A2A endpoint.
+- `.env` is now loaded by the V2 entry point without overriding already
+  exported variables.
+- The required Codex non-interactive, sandbox, JSONL, ephemeral, config, and
+  git-check flags are checked at runtime by `--preflight-only`; see the
+  current official
+  [non-interactive mode documentation](https://learn.chatgpt.com/docs/non-interactive-mode).
+
+Repository verification at the Phase 5 audit point:
+
+```text
+454 passed, 4 skipped, 31 subtests passed
+```
+
+That run was performed on Windows. The skipped cases are environment-bound
+(including symlink cases that should execute on macOS), so it is evidence of
+portable logic, not proof that real Mac hardware works. Do not label the
+physical configuration "macOS verified" until a teammate runs this exact gate
+on the intended demo Mac:
+
+```bash
+cd 7-10-7-12-Hackathon
+source .venv/bin/activate
+python3 -B -m pytest tests -q
+
+python3 run_owner_handoff_demo.py \
+  --simulate \
+  --workspace demo_workspace/sample_project \
+  --executor fake
+
+codex login status
+python3 run_owner_handoff_demo.py \
+  --workspace demo_workspace/sample_project \
+  --executor codex \
+  --preflight-only
+```
+
+Release criteria:
+
+- all tests pass on the target Mac, with every unexpected skip investigated;
+- the full fake coding transcript completes and the original fixture remains
+  unchanged;
+- Codex login succeeds and preflight advertises every required flag;
+- for real Codex mode, one explicitly authorized rehearsal finishes inside a
+  duplicate and its diff is reviewed manually;
+- for physical mode, one leave/answer/return cycle succeeds with the intended
+  radar and wearable firmware.
+
+Until the last item passes, the deterministic simulator demo is ready, the
+macOS software path is code-reviewed and testable, but real BLE/radar operation
+remains an integration milestone rather than a completed feature.
