@@ -1,0 +1,8 @@
+13:13:26 PresenceDetected
+13:13:26 StateChanged {'old_state': 'Idle', 'new_state': 'Working'}
+13:13:26 SessionStarted {'session_id': 1, 'start_time': '2026-07-25T05:13:26.278777+00:00'}
+13:13:26 StatisticsUpdated {'total_work_seconds': 0, 'session_count': 1, 'break_count': 0, 'longest_focus_seconds': 0}
+13:20:30 Shutdown
+13:20:30 StateChanged {'old_state': 'Working', 'new_state': 'Finished'}
+13:20:30 SessionEnded {'session_id': 1, 'start_time': '2026-07-25T05:13:26.278777+00:00', 'end_time': '2026-07-25T05:20:30.470707+00:00', 'duration_seconds': 424, 'break_count': 0}
+13:20:30 StatisticsUpdated {'total_work_seconds': 424, 'session_count': 1, 'break_count': 0, 'longest_focus_seconds': 424}
